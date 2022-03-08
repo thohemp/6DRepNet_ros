@@ -31,6 +31,16 @@ roscore # start roscore
 rosrun 6DRepNet_ros 6drepnet_node.py  --snapshot 6DRepNet_300W_LP_AFLW2000.pth \
                 --cam 0
 ```
+
+
+##  **Image topic Demo**:
+
+```sh
+roscore # start roscore
+rosrun 6DRepNet_ros 6drepnet_node.py  --snapshot 6DRepNet_300W_LP_AFLW2000.pth \
+                --image_topic /image/image_raw/compressed
+```
+
 ### Topics:
 * sixdrepnet/image
 
