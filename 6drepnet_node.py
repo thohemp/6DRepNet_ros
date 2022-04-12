@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from model import SixDRepNet
+from model import SixDRepNet, sixdrepnet_mobile_small
 import math
 import sys
 import os
@@ -37,18 +37,23 @@ class SixDRepNet_Node:
         self.cam = args.cam_id
         self.snapshot_path = args.snapshot
         self.sub_topic = args.image_topic
-        self.detector = RetinaFace(gpu_id=self.gpu) 
+        self.cpu = args.cpu
+        if not args.cpu: self.detector = RetinaFace(gpu_id=self.gpu) 
+        else: self.detector = RetinaFace(-1)
+
 
         # Node cycle rate (in Hz).
         self.loop_rate = rospy.Rate(1)
 
         self.pub = rospy.Publisher('sixdrepnet/image', Image_msg,queue_size=10)
+        self.pub_compr = rospy.Publisher('sixdrepnet/image/compressed', CompressedImage, queue_size=10)
         if self.sub_topic is not '': self.sub = rospy.Subscriber(self.sub_topic, CompressedImage, self.image_callback) 
 
-        self.model = SixDRepNet(backbone_name='RepVGG-B1g2',
-                            backbone_file='',
-                            deploy=True,
-                            pretrained=False)
+        #self.model = SixDRepNet(backbone_name='RepVGG-B1g2',
+        #                    backbone_file='',
+        #                    deploy=True,
+        #                    pretrained=False)
+        self.model = sixdrepnet_mobile_small()
 
         self.transformations = transforms.Compose([transforms.Resize(224),
                                       transforms.CenterCrop(224),
@@ -64,14 +69,14 @@ class SixDRepNet_Node:
             self.model.load_state_dict(saved_state_dict['model_state_dict'])
         else:
             self.model.load_state_dict(saved_state_dict)    
-        self.model.cuda(self.gpu)
+        if not args.cpu: self.model.cuda(args.gpu)
 
         # Test the Model
         self.model.eval()  # Change model to 'eval' mode (BN uses moving mean/var).
 
         if self.sub_topic == '':
             try:
-                pass#self.run_6drepnet()
+                self.run_camera()
             except rospy.ROSInterruptException:
                 pass
         else:
@@ -94,6 +99,7 @@ class SixDRepNet_Node:
         parser.add_argument('--image_topic',
                             dest='image_topic', help='Compressed image topic to subscribe to.',
                             default='', type=str)
+        parser.add_argument('--cpu', action='store_true', default=False)
 
 
         args = parser.parse_args()
@@ -101,6 +107,7 @@ class SixDRepNet_Node:
 
     def image_callback(self, data):
         #img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
+
         img = np.fromstring(data.data, np.uint8)
         img = cv2.imdecode(img, cv2.IMREAD_COLOR)
         #cv2.imshow("test", img)
@@ -120,6 +127,14 @@ class SixDRepNet_Node:
         image_temp.step=w*3
         self.pub.publish(image_temp)
 
+        #### Create CompressedIamge ####
+        msg = CompressedImage()
+        msg.header.stamp = rospy.Time.now()
+        msg.format = "jpeg"
+        msg.data = np.array(cv2.imencode('.jpg', imgdata)[1]).tostring()
+        # Publish new image
+        self.pub_compr.publish(msg)
+
     def run_camera(self):
         cap = cv2.VideoCapture(self.cam)
         # Check if the webcam is opened correctly
@@ -135,7 +150,7 @@ class SixDRepNet_Node:
         with torch.no_grad():
 
             faces = self.detector(frame)
-
+              
             for box, landmarks, score in faces:
 
                 # Print the location of each face in this image
@@ -157,8 +172,8 @@ class SixDRepNet_Node:
                 img = Image.fromarray(img)
                 img = img.convert('RGB')
                 img = self.transformations(img)
-
-                img = torch.Tensor(img[None, :]).cuda(self.gpu)
+                img = torch.Tensor(img[None, :])
+                if not self.cpu: img.cuda(self.gpu)
 
 
                 c = cv2.waitKey(1)
@@ -171,7 +186,7 @@ class SixDRepNet_Node:
                 print('Head pose estimation: %2f ms'% ((end - start)*1000.))
 
                 euler = utils.compute_euler_angles_from_rotation_matrices(
-                    R_pred)*180/np.pi
+                    R_pred, False)*180/np.pi
                 p_pred_deg = euler[:, 0].cpu()
                 y_pred_deg = euler[:, 1].cpu()
                 r_pred_deg = euler[:, 2].cpu()
@@ -181,8 +196,8 @@ class SixDRepNet_Node:
                 utils.plot_pose_cube(frame,  y_pred_deg, p_pred_deg, r_pred_deg, x_min + int(.5*(x_max-x_min)), y_min + int(.5*(y_max-y_min)), size = bbox_width)
                 
             
-            cv2.imshow("Demo", frame)
-            cv2.waitKey(5)
+            #cv2.imshow("Demo", frame)
+            #cv2.waitKey(5)
 
             # Publish image 
             self.publish_image(frame)
