@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 from model import SixDRepNet, sixdrepnet_mobile_small
 import math
@@ -34,10 +34,12 @@ class SixDRepNet_Node:
         args = self.parse_args()
         cudnn.enabled = True
         self.gpu = args.gpu_id
+        self.dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         self.cam = args.cam_id
         self.snapshot_path = args.snapshot
         self.sub_topic = args.image_topic
         self.cpu = args.cpu
+        self.c = args.c
         if not args.cpu: self.detector = RetinaFace(gpu_id=self.gpu) 
         else: self.detector = RetinaFace(-1)
 
@@ -47,8 +49,8 @@ class SixDRepNet_Node:
 
         self.pub = rospy.Publisher('sixdrepnet/image', Image_msg,queue_size=10)
         self.pub_compr = rospy.Publisher('sixdrepnet/image/compressed', CompressedImage, queue_size=10)
-        if self.sub_topic is not '': self.sub = rospy.Subscriber(self.sub_topic, CompressedImage, self.image_callback) 
-
+        if self.sub_topic is not '' and self.c: self.sub = rospy.Subscriber(self.sub_topic, CompressedImage, self.image_callback) 
+        elif self.sub_topic is not '' and not self.c: self.sub = rospy.Subscriber(self.sub_topic, Image_msg, self.image_callback_raw)
         #self.model = SixDRepNet(backbone_name='RepVGG-B1g2',
         #                    backbone_file='',
         #                    deploy=True,
@@ -63,13 +65,13 @@ class SixDRepNet_Node:
         print('Loading data.')
         # Load snapshot
         saved_state_dict = torch.load(os.path.join(
-            self.snapshot_path), map_location='cpu')
+            self.snapshot_path))
 
         if 'model_state_dict' in saved_state_dict:
             self.model.load_state_dict(saved_state_dict['model_state_dict'])
         else:
             self.model.load_state_dict(saved_state_dict)    
-        if not args.cpu: self.model.cuda(args.gpu)
+        if not args.cpu: self.model.to(self.dev)
 
         # Test the Model
         self.model.eval()  # Change model to 'eval' mode (BN uses moving mean/var).
@@ -95,12 +97,12 @@ class SixDRepNet_Node:
                             default=0, type=int)
         parser.add_argument('--snapshot',
                             dest='snapshot', help='Name of model snapshot.',
-                            default='model/6DRepNet_300W_LP_AFLW2000.pth', type=str)
+                            default='model/6drepnet_mobile_small.tar', type=str)
         parser.add_argument('--image_topic',
                             dest='image_topic', help='Compressed image topic to subscribe to.',
                             default='', type=str)
         parser.add_argument('--cpu', action='store_true', default=False)
-
+        parser.add_argument('--c', action='store_true', default=False, help='Set if image_topic is compressed')
 
         args = parser.parse_args()
         return args
@@ -112,7 +114,16 @@ class SixDRepNet_Node:
         img = cv2.imdecode(img, cv2.IMREAD_COLOR)
         #cv2.imshow("test", img)
         #(cv2.waitKey(5)
+        start = time.time()
         self.inference(img)
+        end = time.time()
+        print('Head pose estimation: %2f ms'% ((end - start)*1000.))
+
+
+    def image_callback_raw(self, data):
+        img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
+        self.inference(img)
+
 
     def publish_image(self, imgdata):
         h, w, c = imgdata.shape
@@ -173,7 +184,7 @@ class SixDRepNet_Node:
                 img = img.convert('RGB')
                 img = self.transformations(img)
                 img = torch.Tensor(img[None, :])
-                if not self.cpu: img.cuda(self.gpu)
+                if not self.cpu: img.to(self.dev)
 
 
                 c = cv2.waitKey(1)
@@ -181,12 +192,15 @@ class SixDRepNet_Node:
                     break
                     
                 start = time.time()
+            
+                img = img.cuda()
+                            
                 R_pred = self.model(img)
                 end = time.time()
-                print('Head pose estimation: %2f ms'% ((end - start)*1000.))
+             #  print('Head pose estimation: %2f ms'% ((end - start)*1000.))
 
                 euler = utils.compute_euler_angles_from_rotation_matrices(
-                    R_pred, False)*180/np.pi
+                    R_pred)*180/np.pi
                 p_pred_deg = euler[:, 0].cpu()
                 y_pred_deg = euler[:, 1].cpu()
                 r_pred_deg = euler[:, 2].cpu()
