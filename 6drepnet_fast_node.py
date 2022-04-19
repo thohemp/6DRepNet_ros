@@ -52,12 +52,12 @@ class SixDRepNet_Node:
         from vision.utils.misc import Timer
 
         if self.net_type == 'slim':
-            face_model_path = "model/version-slim-320.pth"
+            face_model_path = "model/version-slim-640.pth"
             # model_path = "models/pretrained/version-slim-640.pth"
             self.face_net = create_mb_tiny_fd(2, is_test=False, device=self.dev)
             self.predictor = create_mb_tiny_fd_predictor(self.face_net, candidate_size=1000, device=self.dev)
         elif self.net_type == 'RFB':
-            model_path = "model/version-RFB-320.pth"
+            model_path = "model/version-RFB-640.pth"
             # model_path = "models/pretrained/version-RFB-640.pth"
             self.face_net = create_Mb_Tiny_RFB_fd(2, is_test=True, device=self.dev)
             self.predictor = create_Mb_Tiny_RFB_fd_predictor(self.face_net, candidate_size=1000, device=self.dev)
@@ -178,13 +178,16 @@ class SixDRepNet_Node:
 
         while not rospy.is_shutdown():
             ret, frame = cap.read()
+            start = time.time()
 
             self.inference(frame)
+            end = time.time()
+            print('Head pose estimation: %2f ms'% ((end - start)*1000.))
 
     def inference(self, frame):
         with torch.no_grad():
             
-            boxes, labels, probs = self.predictor.predict(frame, 500, 0.6)
+            boxes, labels, probs = self.predictor.predict(frame, 500, 0.7)
               
             for i in range(boxes.size(0)):
                 box = boxes[i, :]
@@ -218,13 +221,11 @@ class SixDRepNet_Node:
                 if c == 27:
                     break
                     
-                start = time.time()
             
                 img = img.cuda()
                             
                 R_pred = self.model(img)
-                end = time.time()
-             #  print('Head pose estimation: %2f ms'% ((end - start)*1000.))
+
 
                 euler = utils.compute_euler_angles_from_rotation_matrices(
                     R_pred)*180/np.pi

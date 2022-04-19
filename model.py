@@ -271,7 +271,7 @@ class SixDRepNet_Mobile(nn.Module):
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.linear_reg(x)
-        return utils.compute_rotation_matrix_from_ortho6d(x, False)
+        return utils.compute_rotation_matrix_from_ortho6d(x)
 
     def _initialize_weights(self):
         for m in self.modules():
