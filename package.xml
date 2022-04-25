@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>6DRepNet_ros</name>
+  <name>6drepnet_ros</name>
   <version>0.0.0</version>
   <description>ROS implementation of 6DRepNet. "6D Rotation representation for unconstrained head pose estimation", Thorsten Hempel and Ahmed A. Abdelrahman and Ayoub Al-Hamadi, 2022. </description>
   <maintainer email="thorsten.hempel@ovgu.de">Thorsten Hempel</maintainer>
