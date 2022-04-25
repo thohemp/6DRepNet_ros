@@ -24,11 +24,11 @@ from PIL import Image
 from sensor_msgs.msg import Image as Image_msg
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Header
+from geometry_msgs.msg import Quaternion, PoseStamped, Pose
 
 from vision.ssd.config.fd_config import define_img_size
 
 import time
-from face_detection import RetinaFace
 
 
 class SixDRepNet_Node:
@@ -43,6 +43,7 @@ class SixDRepNet_Node:
         self.cpu = args.cpu
         self.c = args.c
         self.net_type = args.net_type
+        self.image_stamp = 0
         #if not args.cpu: self.detector = RetinaFace(gpu_id=self.gpu) 
         #else: self.detector = RetinaFace(-1)
 
@@ -70,8 +71,9 @@ class SixDRepNet_Node:
         # Node cycle rate (in Hz).
         self.loop_rate = rospy.Rate(1)
 
-        self.pub = rospy.Publisher('sixdrepnet/image', Image_msg,queue_size=10)
-        self.pub_compr = rospy.Publisher('sixdrepnet/image/compressed', CompressedImage, queue_size=10)
+        self.pub_img = rospy.Publisher('sixdrepnet/image', Image_msg,queue_size=10)
+        self.pub_img_compr = rospy.Publisher('sixdrepnet/image/compressed', CompressedImage, queue_size=10)
+        self.pub_rotation = rospy.Publisher('sixdrepnet/rotation', PoseStamped, queue_size=10)
         if self.sub_topic is not '' and self.c: self.sub = rospy.Subscriber(self.sub_topic, CompressedImage, self.image_callback) 
         elif self.sub_topic is not '' and not self.c: self.sub = rospy.Subscriber(self.sub_topic, Image_msg, self.image_callback_raw)
         #self.model = SixDRepNet(backbone_name='RepVGG-B1g2',
@@ -133,7 +135,7 @@ class SixDRepNet_Node:
 
     def image_callback(self, data):
         #img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
-
+        self.image_stamp = data.header.stamp
         img = np.fromstring(data.data, np.uint8)
         img = cv2.imdecode(img, cv2.IMREAD_COLOR)
         #cv2.imshow("test", img)
@@ -145,9 +147,9 @@ class SixDRepNet_Node:
 
 
     def image_callback_raw(self, data):
+        self.image_stamp = data.header.stamp
         img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
         self.inference(img)
-
 
     def publish_image(self, imgdata):
         h, w, c = imgdata.shape
@@ -160,15 +162,30 @@ class SixDRepNet_Node:
         image_temp.data=np.array(imgdata).tostring()
         image_temp.header=header
         image_temp.step=w*3
-        self.pub.publish(image_temp)
+        self.pub_img.publish(image_temp)
 
+    def publish_image_compressed(self, imgdata):
         #### Create CompressedIamge ####
         msg = CompressedImage()
         msg.header.stamp = rospy.Time.now()
         msg.format = "jpeg"
+        imgdata = cv2.cvtColor(imgdata, cv2.COLOR_BGR2RGB)
+
         msg.data = np.array(cv2.imencode('.jpg', imgdata)[1]).tostring()
         # Publish new image
-        self.pub_compr.publish(msg)
+        self.pub_img_compr.publish(msg)
+
+    def publish_rotation(self, yaw, pitch, roll):
+
+        quaternion = utils.get_quaternion_from_euler(roll, pitch, yaw)
+        q = Quaternion(quaternion[0],quaternion[1],quaternion[2],quaternion[3])
+        p = Pose()
+        p.orientation = q
+        ps = PoseStamped()
+        ps.header.stamp = self.image_stamp
+        ps.pose = p
+        self.pub_rotation.publish(ps)
+
 
     def run_camera(self):
         cap = cv2.VideoCapture(self.cam)
@@ -213,36 +230,37 @@ class SixDRepNet_Node:
                 img = Image.fromarray(img)
                 img = img.convert('RGB')
                 img = self.transformations(img)
-                img = torch.Tensor(img[None, :])
+                img = img[None, :]
                 if not self.cpu: img.to(self.dev)
-
 
                 c = cv2.waitKey(1)
                 if c == 27:
                     break
                     
-            
                 img = img.cuda()
-                            
+                self.model = self.model.cuda()
                 R_pred = self.model(img)
 
 
                 euler = utils.compute_euler_angles_from_rotation_matrices(
-                    R_pred)*180/np.pi
+                    R_pred)
                 p_pred_deg = euler[:, 0].cpu()
                 y_pred_deg = euler[:, 1].cpu()
                 r_pred_deg = euler[:, 2].cpu()
 
-                
                 #utils.draw_axis(frame, y_pred_deg, p_pred_deg, r_pred_deg, left+int(.5*(right-left)), top, size=100)
-                utils.plot_pose_cube(frame,  y_pred_deg, p_pred_deg, r_pred_deg, x_min + int(.5*(x_max-x_min)), y_min + int(.5*(y_max-y_min)), size = bbox_width)
+                utils.plot_pose_cube(frame,  y_pred_deg*180/np.pi, p_pred_deg*180/np.pi, r_pred_deg*180/np.pi, x_min + int(.5*(x_max-x_min)), y_min + int(.5*(y_max-y_min)), size = bbox_width)
                 
+                # Publish orientation as posestamped
+
+                self.publish_rotation(y_pred_deg.numpy(), p_pred_deg.numpy(), r_pred_deg.numpy())
             
             #cv2.imshow("Demo", frame)
             #cv2.waitKey(5)
 
             # Publish image 
             self.publish_image(frame)
+            self.publish_image_compressed(frame)
             # self.loop_rate.sleep()
 
   
