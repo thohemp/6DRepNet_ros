@@ -6,6 +6,22 @@ Basic ROS implementation of 6DRepNet. For for information visit https://github.c
   <img src="https://github.com/thohemp/archive/blob/main/6DRepNet2.gif" alt="animated" />
 </p>
 
+## **Citing**
+
+If you find our work useful, please cite the paper:
+
+```BibTeX
+@INPROCEEDINGS{9897219,
+  author={Hempel, Thorsten and Abdelrahman, Ahmed A. and Al-Hamadi, Ayoub},
+  booktitle={2022 IEEE International Conference on Image Processing (ICIP)}, 
+  title={6d Rotation Representation For Unconstrained Head Pose Estimation}, 
+  year={2022},
+  volume={},
+  number={},
+  pages={2496-2500},
+  doi={10.1109/ICIP46576.2022.9897219}}
+```
+
 # <div align="center"> **Quick Start**: </div>
 
 ```sh
